@@ -1,0 +1,21 @@
+[project]
+name = "kumdb"
+version = "0.1.0"
+description = "Lightweight file-based DB with JSON, CSV, and Msgpack support"
+authors = [{ name="Tvoje Ime", email="tvoj@email.com" }]
+readme = "README.md"
+license = {text = "MIT"}
+dependencies = [
+    "msgpack",
+]
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "mypy"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
