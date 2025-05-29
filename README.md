@@ -140,4 +140,4 @@ A: Submit a PR or GTFO
 
 ---
 
-**⭐ PRO TIP:** If this saves you more than 5 minutes, star the repo and go drink a beer. You've earned it.**
+**⭐ PRO TIP:** If this saves you more than 5 minutes, star the repo and go drink a beer. You've earned it.
