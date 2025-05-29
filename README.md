@@ -3,6 +3,7 @@
 <p align="center">
   <img src="Logo.png" alt="KumDB Logo" width="200"/>
 </p>
+
 ---
 
 ## **⚠️ WARNING**  
