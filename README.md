@@ -1,4 +1,4 @@
-# **KUMDB** 🔥🚀  
+# **KumDB** 🔥🚀  
 ### *"The Database That Doesn't Waste Your F*cking Time"  
 
 
