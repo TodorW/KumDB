@@ -16,6 +16,8 @@ from typing import (
     Set,
     Iterable
 )
+from dataclasses import dataclass
+from typing import TypedDict
 from pathlib import Path
 from datetime import datetime
 

@@ -2,6 +2,9 @@
 KUMDB Exceptions - When shit goes wrong, we tell you exactly why.
 """
 
+from __future__ import annotations
+from typing import Any, Type
+
 class KumDBError(Exception):
     """Base exception class for all KUMDB errors."""
     def __init__(self, message: str = "KUMDB fucked up"):
@@ -114,7 +117,7 @@ class ConstraintViolationError(KumDBError):
 
 class TypeValidationError(KumDBError):
     """Raised when data types don't match expectations."""
-    def __init__(self, field: str, expected: type, got: type):
+    def __init__(self, field: str, expected: Type, got: Type):
         super().__init__(
             f"Field '{field}' expects {expected.__name__}, "
             f"but got {got.__name__}. Learn to type."

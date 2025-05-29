@@ -1,8 +1,8 @@
 # **KumDB** 🔥🚀  
 ### *"The Database That Doesn't Waste Your F*cking Time"  
-
-
-
+<p align="center">
+  <img src="Logo.png" alt="KumDB Logo" width="200"/>
+</p>
 ---
 
 ## **⚠️ WARNING**  

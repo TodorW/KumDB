@@ -1,43 +1,63 @@
 import csv
+import io
 import json
 import os
 import pickle
+import re
 import shutil
 import threading
 import uuid
 import zlib
-from datetime import datetime
-from enum import Enum
-from hashlib import sha256
-from pathlib import Path
-from typing import (Any, Callable, Dict, List, Optional, Set, Tuple, Union, 
-                   Generator, Iterable, TypeVar, Generic)
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from dataclasses import dataclass, field
-import msgpack  # For ultra-fast binary serialization
+from datetime import datetime
+from enum import Enum
+from functools import lru_cache
+from hashlib import sha256
+from pathlib import Path
+from typing import (Any, Callable, Dict, Generator, Generic, Iterable, List,
+                    Optional, Set, Tuple, TypeVar, Union)
+
+# ===== OPTIONAL DEPENDENCIES =====
+try:
+    import msgpack
+    HAS_MSGPACK = True
+except ImportError:
+    msgpack = None
+    HAS_MSGPACK = False
 
 # ========== CUSTOM EXCEPTIONS ==========
 class KumDBError(Exception):
     """Base exception for all KumDB errors."""
-    pass
+    def __init__(self, message: str = "KUMDB operation failed"):
+        self.message = message
+        super().__init__(message)
 
 class TableNotFoundError(KumDBError):
     """Raised when a table doesn't exist."""
-    pass
+    def __init__(self, table_name: str):
+        super().__init__(f"Table '{table_name}' not found. Create it first.")
 
 class InvalidDataError(KumDBError):
     """Raised for invalid data operations."""
-    pass
+    def __init__(self, message: str = "Invalid data operation"):
+        super().__init__(f"Data Error: {message}")
+
+class FeatureNotAvailableError(KumDBError):
+    """Raised when trying to use an unavailable feature."""
+    def __init__(self, feature: str):
+        super().__init__(f"Feature '{feature}' requires additional packages")
 
 class TransactionError(KumDBError):
-    """Raised for transaction-related errors."""
-    pass
+    """Raised for transaction-related failures."""
+    def __init__(self, message: str = "Transaction failed"):
+        super().__init__(f"Transaction Error: {message}")
 
 class LockTimeoutError(KumDBError):
     """Raised when a lock can't be acquired."""
-    pass
+    def __init__(self, resource: str, timeout: float):
+        super().__init__(f"Couldn't lock '{resource}' after {timeout} seconds")
 
 # ========== ENUMS & TYPES ==========
 class IndexType(Enum):
@@ -50,9 +70,9 @@ Record = Dict[str, Any]
 ResultSet = List[Record]
 QueryFunc = Callable[[Record], bool]
 
-# ========== CORE DATABASE ==========
+# ========== CORE DATABASE CLASS ==========
 class KumDB:
-    """The baddest, simplest database system that gets shit done."""
+    """The no-bullshit database system for Python."""
     
     def __init__(self, 
                  folder: str = "data", 
@@ -60,16 +80,22 @@ class KumDB:
                  auto_commit: bool = True,
                  cache_size: int = 1000):
         """
-        Initialize KumDB with savage performance options.
+        Initialize a new KUMDB instance.
         
         Args:
-            folder: Where to store data (default: 'data')
-            file_format: 'json', 'csv', or 'msgpack' (default: 'json')
-            auto_commit: Whether to save changes immediately (default: True)
-            cache_size: Max cached records per table (default: 1000)
+            folder: Directory to store data files
+            file_format: Storage format ('json', 'csv', or 'msgpack')
+            auto_commit: Whether to save changes immediately
+            cache_size: Maximum number of cached tables
         """
         self.folder = Path(folder).absolute()
         self.file_format = file_format.lower()
+        
+        if self.file_format == "msgpack" and not HAS_MSGPACK:
+            raise FeatureNotAvailableError(
+                "msgpack support requires 'pip install msgpack'"
+            )
+            
         self.auto_commit = auto_commit
         self.cache_size = cache_size
         self._lock = threading.RLock()
@@ -77,63 +103,41 @@ class KumDB:
         self._cache = {}
         self._indexes = defaultdict(dict)
         
-        # Ensure data directory exists
         self.folder.mkdir(exist_ok=True)
-        
-        # Discover existing tables
         self.tables = self._discover_tables()
-        
-        # Background writer thread
         self._writer_executor = ThreadPoolExecutor(max_workers=1)
         self._pending_writes = {}
-        
+
     def __repr__(self) -> str:
         return f"<KumDB: {len(self.tables)} tables | {self.file_format} | {self.folder}>"
-    
+
     def __enter__(self):
-        """Context manager support for transactions."""
+        """Enter transaction context."""
         self.begin_transaction()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Commit or rollback on context exit."""
+        """Exit transaction context."""
         if exc_type is None:
             self.commit_transaction()
         else:
             self.rollback_transaction()
-    
+
     # ===== CORE CRUD OPERATIONS =====
     @lru_cache(maxsize=100)
-    def find(self, 
-             table: str, 
-             **conditions) -> ResultSet:
-        """
-        Find records matching conditions with savage speed.
-        
-        Examples:
-            >>> db.find("users", age__gt=25)
-            >>> db.find("products", price__lt=100, in_stock=True)
-        """
+    def find(self, table: str, **conditions) -> ResultSet:
+        """Find records matching conditions."""
         with self._lock:
             data = self._load_table(table)
             return [row for row in data if self._matches(row, conditions)]
-    
-    def find_one(self, 
-                 table: str, 
-                 **conditions) -> Optional[Record]:
-        """Get first matching record or None."""
+
+    def find_one(self, table: str, **conditions) -> Optional[Record]:
+        """Find first matching record or None."""
         results = self.find(table, **conditions)
         return results[0] if results else None
-    
-    def add(self, 
-            table: str, 
-            **data) -> Record:
-        """
-        Add a new record with automatic ID generation.
-        
-        Example:
-            >>> db.add("users", name="John", age=30)
-        """
+
+    def add(self, table: str, **data) -> Record:
+        """Add a new record to a table."""
         with self._lock:
             if 'id' not in data:
                 data['id'] = str(uuid.uuid4())
@@ -144,48 +148,29 @@ class KumDB:
             if self.auto_commit:
                 self._schedule_write(table, records)
                 
-            # Update indexes
             self._update_indexes(table, data)
-            
             return data
-    
-    def update(self, 
-               table: str, 
-               where: Dict[str, Any],
-               **new_data) -> int:
-        """
-        Update records matching conditions.
-        Returns number of records updated.
-        """
+
+    def update(self, table: str, where: Dict[str, Any], **new_data) -> int:
+        """Update records matching conditions."""
         with self._lock:
             records = self._load_table(table)
             updated = 0
             
             for record in records:
                 if self._matches(record, where):
-                    # Store old values for index updates
-                    old_values = {k: record[k] for k in new_data.keys() 
-                                if k in record}
-                    
-                    # Update record
+                    old_values = {k: record[k] for k in new_data.keys() if k in record}
                     record.update(new_data)
                     updated += 1
-                    
-                    # Update indexes
                     self._update_indexes(table, record, old_values)
             
             if updated and self.auto_commit:
                 self._schedule_write(table, records)
                 
             return updated
-    
-    def delete(self, 
-               table: str, 
-               **conditions) -> int:
-        """
-        Delete records matching conditions.
-        Returns number of records deleted.
-        """
+
+    def delete(self, table: str, **conditions) -> int:
+        """Delete records matching conditions."""
         with self._lock:
             records = self._load_table(table)
             remaining = [r for r in records if not self._matches(r, conditions)]
@@ -195,7 +180,6 @@ class KumDB:
                 if self.auto_commit:
                     self._schedule_write(table, remaining)
                     
-                # Clean up indexes for deleted records
                 for record in records:
                     if not self._matches(record, conditions):
                         continue
@@ -203,42 +187,24 @@ class KumDB:
                         self._remove_from_indexes(table, record['id'])
             
             return deleted
-    
+
     # ===== TABLE OPERATIONS =====
-    def create_table(self, 
-                    table: str, 
-                    schema: Optional[Dict[str, type]] = None,
+    def create_table(self, table: str, schema: Optional[Dict[str, type]] = None,
                     indexes: Optional[Dict[str, IndexType]] = None) -> None:
-        """
-        Create a new table with optional schema and indexes.
-        
-        Example:
-            >>> db.create_table(
-            ...     "users",
-            ...     schema={"name": str, "age": int},
-            ...     indexes={"name": IndexType.HASH}
-            ... )
-        """
+        """Create a new table with optional schema and indexes."""
         with self._lock:
             if table in self.tables:
                 raise InvalidDataError(f"Table '{table}' already exists")
                 
-            # Initialize with empty list
             self._save_table(table, [])
             self.tables.add(table)
             
-            # Create indexes if specified
             if indexes:
                 for field, index_type in indexes.items():
                     self.create_index(table, field, index_type)
-    
-    def drop_table(self, 
-                   table: str, 
-                   confirm: bool = False) -> None:
-        """
-        Permanently delete a table and all its data.
-        Requires explicit confirmation.
-        """
+
+    def drop_table(self, table: str, confirm: bool = False) -> None:
+        """Permanently delete a table and all its data."""
         if not confirm:
             raise KumDBError("Must pass confirm=True to drop table")
             
@@ -247,20 +213,16 @@ class KumDB:
                 os.remove(self._table_path(table))
                 self.tables.remove(table)
                 
-                # Clean up indexes
                 if table in self._indexes:
                     del self._indexes[table]
                     
-                # Clear cache
                 if table in self._cache:
                     del self._cache[table]
                     
             except FileNotFoundError:
                 raise TableNotFoundError(f"Table '{table}' not found")
-    
-    def truncate_table(self, 
-                      table: str, 
-                      confirm: bool = False) -> None:
+
+    def truncate_table(self, table: str, confirm: bool = False) -> None:
         """Delete all records in a table while keeping the structure."""
         if not confirm:
             raise KumDBError("Must pass confirm=True to truncate table")
@@ -268,21 +230,13 @@ class KumDB:
         with self._lock:
             self._save_table(table, [])
             
-            # Clear indexes for this table
             if table in self._indexes:
                 self._indexes[table].clear()
-    
+
     # ===== INDEXING =====
-    def create_index(self, 
-                     table: str, 
-                     field: str,
-                     index_type: IndexType = IndexType.HASH) -> None:
-        """
-        Create an index on a field for faster queries.
-        
-        Example:
-            >>> db.create_index("users", "email", IndexType.HASH)
-        """
+    def create_index(self, table: str, field: str,
+                    index_type: IndexType = IndexType.HASH) -> None:
+        """Create an index on a field for faster queries."""
         with self._lock:
             if table not in self._indexes:
                 self._indexes[table] = {}
@@ -290,7 +244,6 @@ class KumDB:
             if field in self._indexes[table]:
                 raise InvalidDataError(f"Index already exists on {table}.{field}")
                 
-            # Build the index
             records = self._load_table(table)
             index = {}
             
@@ -303,28 +256,20 @@ class KumDB:
                     if value not in index:
                         index[value] = []
                     index[value].append(record['id'])
-                elif index_type == IndexType.BTREE:
-                    # Implement B-tree structure here
-                    pass
-                elif index_type == IndexType.FULLTEXT:
-                    # Implement full-text indexing
-                    pass
                     
             self._indexes[table][field] = {
                 'type': index_type,
                 'data': index
             }
-    
-    def drop_index(self, 
-                   table: str, 
-                   field: str) -> None:
+
+    def drop_index(self, table: str, field: str) -> None:
         """Remove an index from a field."""
         with self._lock:
             if table not in self._indexes or field not in self._indexes[table]:
                 raise InvalidDataError(f"No index exists on {table}.{field}")
                 
             del self._indexes[table][field]
-    
+
     # ===== TRANSACTIONS =====
     def begin_transaction(self) -> None:
         """Start a new transaction."""
@@ -332,7 +277,7 @@ class KumDB:
             'tables': set(),
             'original_data': {}
         })
-    
+
     def commit_transaction(self) -> None:
         """Commit all changes in the current transaction."""
         if not self._transaction_stack:
@@ -343,7 +288,7 @@ class KumDB:
         with self._lock:
             for table in transaction['tables']:
                 self._save_table(table, self._load_table(table))
-    
+
     def rollback_transaction(self) -> None:
         """Rollback all changes in the current transaction."""
         if not self._transaction_stack:
@@ -355,19 +300,14 @@ class KumDB:
             for table, data in transaction['original_data'].items():
                 self._save_table(table, data)
                 
-            # Clear cache for affected tables
             for table in transaction['tables']:
                 if table in self._cache:
                     del self._cache[table]
-    
+
     # ===== ADVANCED FEATURES =====
-    def batch_import(self, 
-                     table: str, 
-                     data: List[Record],
-                     chunk_size: int = 1000) -> None:
-        """
-        Import multiple records efficiently in chunks.
-        """
+    def batch_import(self, table: str, data: List[Record],
+                    chunk_size: int = 1000) -> None:
+        """Import multiple records efficiently in chunks."""
         with self._lock:
             records = self._load_table(table)
             records.extend(data)
@@ -375,58 +315,42 @@ class KumDB:
             if self.auto_commit:
                 self._schedule_write(table, records)
                 
-            # Update indexes in bulk
             for record in data:
                 self._update_indexes(table, record)
-    
-    def export_table(self, 
-                     table: str, 
-                     output_format: str = "json",
-                     compress: bool = False) -> Union[str, bytes, List[Record]]:
-        """
-        Export table data with multiple format options.
-        
-        Args:
-            output_format: 'json', 'csv', 'msgpack', or 'dict'
-            compress: Whether to compress the output
-        """
+
+    def export_table(self, table: str, output_format: str = "json",
+                    compress: bool = False) -> Union[str, bytes, List[Record]]:
+        """Export table data in specified format."""
         data = self._load_table(table)
         
-        if output_format == "json":
-            result = json.dumps(data, indent=2).encode('utf-8')
-        elif output_format == "csv":
-            output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=data[0].keys() if data else [])
-            writer.writeheader()
-            writer.writerows(data)
-            result = output.getvalue().encode('utf-8')
-        elif output_format == "msgpack":
-            result = msgpack.packb(data)
-        elif output_format == "dict":
-            return data
-        else:
-            raise InvalidDataError(f"Unsupported format: {output_format}")
-        
-        return zlib.compress(result) if compress else result
-    
-    def query(self, 
-              table: str, 
-              func: QueryFunc) -> ResultSet:
-        """
-        Flexible query using a filter function.
-        
-        Example:
-            >>> db.query("users", lambda u: u['age'] > 25 and "john" in u['name'].lower())
-        """
+        try:
+            if output_format == "json":
+                result = json.dumps(data, indent=2).encode('utf-8')
+            elif output_format == "csv":
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=data[0].keys() if data else [])
+                writer.writeheader()
+                writer.writerows(data)
+                result = output.getvalue().encode('utf-8')
+            elif output_format == "msgpack":
+                if not HAS_MSGPACK:
+                    raise FeatureNotAvailableError("msgpack")
+                result = msgpack.packb(data)
+            elif output_format == "dict":
+                return data
+            else:
+                raise InvalidDataError(f"Unsupported format: {output_format}")
+            
+            return zlib.compress(result) if compress else result
+        except Exception as e:
+            raise InvalidDataError(f"Export failed: {str(e)}")
+
+    def query(self, table: str, func: QueryFunc) -> ResultSet:
+        """Flexible query using a filter function."""
         return [row for row in self._load_table(table) if func(row)]
-    
-    def backup(self, 
-               backup_folder: str,
-               compress: bool = True) -> str:
-        """
-        Create a complete backup of the database.
-        Returns path to backup file.
-        """
+
+    def backup(self, backup_folder: str, compress: bool = True) -> str:
+        """Create a complete backup of the database."""
         backup_path = Path(backup_folder) / f"kumdb_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.kum"
         
         with self._lock:
@@ -442,45 +366,47 @@ class KumDB:
                 }
             }
             
-            serialized = msgpack.packb(backup_data)
-            
-            if compress:
-                serialized = zlib.compress(serialized)
+            try:
+                serialized = msgpack.packb(backup_data) if HAS_MSGPACK else json.dumps(backup_data).encode('utf-8')
                 
-            with open(backup_path, 'wb') as f:
-                f.write(serialized)
-                
-        return str(backup_path)
-    
-    def restore(self, 
-                backup_file: str,
-                confirm: bool = False) -> None:
-        """
-        Restore database from backup.
-        WARNING: Overwrites existing data!
-        """
+                if compress:
+                    serialized = zlib.compress(serialized)
+                    
+                with open(backup_path, 'wb') as f:
+                    f.write(serialized)
+                    
+                return str(backup_path)
+            except Exception as e:
+                raise InvalidDataError(f"Backup failed: {str(e)}")
+
+    def restore(self, backup_file: str, confirm: bool = False) -> None:
+        """Restore database from backup."""
         if not confirm:
             raise KumDBError("Must pass confirm=True to restore from backup")
             
         with self._lock, open(backup_file, 'rb') as f:
-            data = f.read()
-            
             try:
-                data = zlib.decompress(data)
-            except zlib.error:
-                pass
+                data = f.read()
                 
-            backup = msgpack.unpackb(data)
-            
-            # Clear existing data
-            for table in list(self.tables):
-                self.drop_table(table, confirm=True)
+                try:
+                    data = zlib.decompress(data)
+                except zlib.error:
+                    pass
+                    
+                try:
+                    backup = msgpack.unpackb(data) if HAS_MSGPACK else json.loads(data.decode('utf-8'))
+                except Exception:
+                    raise InvalidDataError("Invalid backup file format")
                 
-            # Restore tables
-            for table, records in backup['data'].items():
-                self._save_table(table, records)
-                self.tables.add(table)
-    
+                for table in list(self.tables):
+                    self.drop_table(table, confirm=True)
+                    
+                for table, records in backup['data'].items():
+                    self._save_table(table, records)
+                    self.tables.add(table)
+            except Exception as e:
+                raise InvalidDataError(f"Restore failed: {str(e)}")
+
     # ===== PRIVATE METHODS =====
     def _discover_tables(self) -> Set[str]:
         """Find all existing tables in the data folder."""
@@ -500,9 +426,8 @@ class KumDB:
     def _load_table(self, table: str) -> List[Record]:
         """Load table data from file with caching."""
         if table not in self.tables:
-            raise TableNotFoundError(f"Table '{table}' not found")
+            raise TableNotFoundError(table)
             
-        # Check cache first
         if table in self._cache:
             return self._cache[table]
             
@@ -510,49 +435,49 @@ class KumDB:
         
         try:
             if self.file_format == "csv":
-                with open(path, 'r') as f:
+                with open(path, 'r', newline='') as f:
                     data = list(csv.DictReader(f))
             elif self.file_format == "json":
                 with open(path, 'r') as f:
                     data = json.load(f)
             elif self.file_format == "msgpack":
+                if not HAS_MSGPACK:
+                    raise FeatureNotAvailableError("msgpack")
                 with open(path, 'rb') as f:
-                    data = msgpack.unpackb(f.read())
+                    data = msgpack.unpack(f, raw=False)
             else:
                 raise InvalidDataError(f"Unsupported format: {self.file_format}")
                 
-            # Cache the data
             self._cache[table] = data
             return data
-            
-        except (FileNotFoundError, json.JSONDecodeError, msgpack.UnpackException):
-            return []
+        except Exception as e:
+            raise InvalidDataError(f"Failed to load table '{table}': {str(e)}")
     
-    def _save_table(self, 
-                    table: str, 
-                    data: List[Record]) -> None:
+    def _save_table(self, table: str, data: List[Record]) -> None:
         """Save table data to file."""
         path = self._table_path(table)
         
-        if self.file_format == "csv":
-            fieldnames = data[0].keys() if data else []
-            with open(path, 'w') as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(data)
-        elif self.file_format == "json":
-            with open(path, 'w') as f:
-                json.dump(data, f, indent=2)
-        elif self.file_format == "msgpack":
-            with open(path, 'wb') as f:
-                f.write(msgpack.packb(data))
-                
-        # Update cache
-        self._cache[table] = data
+        try:
+            if self.file_format == "csv":
+                fieldnames = data[0].keys() if data else []
+                with open(path, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(data)
+            elif self.file_format == "json":
+                with open(path, 'w') as f:
+                    json.dump(data, f, indent=2)
+            elif self.file_format == "msgpack":
+                if not HAS_MSGPACK:
+                    raise FeatureNotAvailableError("msgpack")
+                with open(path, 'wb') as f:
+                    msgpack.pack(data, f)
+                    
+            self._cache[table] = data
+        except Exception as e:
+            raise InvalidDataError(f"Failed to save table '{table}': {str(e)}")
     
-    def _schedule_write(self, 
-                        table: str, 
-                        data: List[Record]) -> None:
+    def _schedule_write(self, table: str, data: List[Record]) -> None:
         """Schedule a write operation in background."""
         self._pending_writes[table] = data
         self._writer_executor.submit(self._process_pending_writes)
@@ -564,26 +489,8 @@ class KumDB:
                 self._save_table(table, data)
             self._pending_writes.clear()
     
-    def _matches(self, 
-                 row: Record, 
-                 conditions: Dict[str, Any]) -> bool:
-        """
-        Check if row matches all conditions with advanced operators.
-        
-        Supported operators:
-        - __eq: Equal to (default)
-        - __ne: Not equal to
-        - __gt: Greater than
-        - __lt: Less than
-        - __gte: Greater than or equal to
-        - __lte: Less than or equal to
-        - __in: Value is in list
-        - __nin: Value is not in list
-        - __contains: String contains
-        - __startswith: String starts with
-        - __endswith: String ends with
-        - __regex: Matches regex pattern
-        """
+    def _matches(self, row: Record, conditions: Dict[str, Any]) -> bool:
+        """Check if row matches all conditions with advanced operators."""
         for key, value in conditions.items():
             if '__' in key:
                 field, op = key.split('__')
@@ -626,7 +533,6 @@ class KumDB:
                     if not str(field_value).endswith(value):
                         return False
                 elif op == 'regex':
-                    import re
                     if not re.search(value, str(field_value)):
                         return False
                 else:
@@ -636,10 +542,8 @@ class KumDB:
                     return False
         return True
     
-    def _update_indexes(self, 
-                        table: str, 
-                        record: Record,
-                        old_values: Optional[Dict[str, Any]] = None) -> None:
+    def _update_indexes(self, table: str, record: Record,
+                       old_values: Optional[Dict[str, Any]] = None) -> None:
         """Update all indexes for a record."""
         if table not in self._indexes:
             return
@@ -654,24 +558,19 @@ class KumDB:
                 
             current_value = record[field]
             
-            # Remove old value from index if needed
             if old_values and field in old_values:
                 old_value = old_values[field]
-                if old_value in index['data']:
-                    if record_id in index['data'][old_value]:
-                        index['data'][old_value].remove(record_id)
-                        if not index['data'][old_value]:
-                            del index['data'][old_value]
+                if old_value in index['data'] and record_id in index['data'][old_value]:
+                    index['data'][old_value].remove(record_id)
+                    if not index['data'][old_value]:
+                        del index['data'][old_value]
             
-            # Add new value to index
             if current_value not in index['data']:
                 index['data'][current_value] = []
             if record_id not in index['data'][current_value]:
                 index['data'][current_value].append(record_id)
     
-    def _remove_from_indexes(self, 
-                             table: str, 
-                             record_id: str) -> None:
+    def _remove_from_indexes(self, table: str, record_id: str) -> None:
         """Remove a record from all indexes."""
         if table not in self._indexes:
             return
