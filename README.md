@@ -9,7 +9,7 @@
 ## **⚠️ WARNING**  
 This is **NOT** for:  
 - SQL lovers ❌  
-- ORM fanboys ❌  
+- ORM femboys ❌  
 - People who enjoy writing `JOIN` statements ❌  
 
 This **IS** for:  
