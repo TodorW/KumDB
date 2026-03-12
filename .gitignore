@@ -1,8 +1,69 @@
-__pycache__/
-*.pyc
-.env
-.idea/
-.vscode/
-dist/
+# ============================================================
+# KumDB .gitignore
+# ============================================================
+
+# Build output
 build/
-*.egg-info/
+bin/
+obj/
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.out
+
+# Compiled binaries
+kumdb
+kumdb_cli
+kumdb_bench
+kumdb_dump
+
+# KumDB data files (never commit your data)
+*.kdb
+*.kdb.tmp
+*.kdb.lock
+data/
+my_data/
+
+# Test artifacts
+tests/data/
+tests/*.kdb
+tests/*.log
+
+# Dependency / package dirs
+deps/
+vendor/
+
+# Editor & IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Clang / GCC artifacts
+*.d
+*.i
+*.s
+compile_commands.json
+
+# Valgrind / sanitizer output
+vgcore.*
+*.memcheck
+
+# Coverage
+*.gcov
+*.gcda
+*.gcno
+coverage/
+
+# Tags
+tags
+TAGS
+.tags
+
+# Logs
+*.log
