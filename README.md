@@ -1,143 +1,219 @@
-# **KumDB** 🔥🚀  
-### *"The Database That Doesn't Waste Your F*cking Time"  
+# **KumDB** 🔥
+### *"The Database That Doesn't Waste Your F*cking Time"*
+
 <p align="center">
-  <img src="Logo.png" alt="KumDB Logo" width="200"/>
+<img src="logo.png" alt="KumDB Logo" width="200"/>
 </p>
 
 ---
 
-## **⚠️ WARNING**  
-This is **NOT** for:  
-- SQL lovers ❌  
-- ORM femboys ❌  
-- People who enjoy writing `JOIN` statements ❌  
+## **⚠️ WARNING**
 
-This **IS** for:  
-- Developers who want **SIMPLE** data persistence ✅  
-- Projects where SQLite is overkill ✅  
-- When you need to **GET SHIT DONE** ✅  
+This is **NOT** for:
+- SQL lovers ❌
+- ORM enjoyers ❌
+- People who enjoy writing `JOIN` statements ❌
+
+This **IS** for:
+- Developers who want **dead-simple** data persistence ✅
+- Embedded projects where SQLite is overkill ✅
+- KumOS and anything that runs C ✅
+- When you need to **GET SHIT DONE** ✅
 
 ---
 
-## **💥 Features**  
-- **Zero SQL** - Just Python dictionaries and lists  
-- **Atomic AF** - Crash-proof writes  
-- **Type Inferencing** - It figures out your data  
-- **100% Pure Python** - No dependencies, no bullshit  
-- **Savage Error Messages** - We tell you *exactly* why you fucked up  
+## **💥 What Is It**
 
-```python
-# How simple? THIS simple:
-db.add("users", name="John", age=30, is_admin=True)
-user = db.find_one("users", name="John")
+KumDB is a lightweight embedded database engine written in pure C11. No SQL. No dependencies. No bullshit. Just a clean key-value-style API on top of a fast binary file format with atomic writes, type inference, and savage error messages.
+
+```c
+// How simple? THIS simple:
+KdbField fields[] = {
+    kdb_field_string("name",   "John"),
+    kdb_field_int   ("age",    30),
+    kdb_field_bool  ("admin",  1),
+    kdb_field_end   ()
+};
+kdb_add(db, "users", fields);
+
+const char *filters[] = { "name=John", NULL };
+KdbRow *user = kdb_find_one(db, "users", filters);
 ```
 
 ---
 
-## **⚡ Quick Start**  
-1. **Install** (if you even need to):  
-   ```bash
-   pip install kumdb
-   ```
-   *or just copy the fucking files - we don't care*
+## **⚡ Quick Start**
 
-2. **Code**:  
-   ```python
-   from kumdb import KumDB
-
-   # Initialize (creates data folder if needed)
-   db = KumDB("my_data") 
-
-   # Create table implicitly 
-   db.add("users", id=1, name="John Savage")
-
-   # Find records
-   badasses = db.find("users", name__contains="Savage")
-
-   # Update 
-   db.update("users", where={"id": 1}, status="Legend")
-
-   # Delete 
-   db.delete("users", id=2)  # Bye Karen
-   ```
-
----
-
-## **🔫 Performance**  
-| Operation | Speed | Notes |  
-|-----------|-------|-------|  
-| `add()` | 50K ops/sec | Faster than your SQL migrations |  
-| `find()` | Instant* | *If you're not dumb with data |  
-| File Size | 70% smaller than JSON | Because we're efficient |  
-
----
-
-## **🤬 Comparison**  
-| Feature | KUMDB | SQLite | MongoDB |  
-|---------|-------|--------|---------|  
-| Learning Curve | 5 mins | 5 weeks | 5 years |  
-| Setup Time | 0 sec | 15 mins | 3 hours |  
-| Debugging | Readable errors | "Syntax error near..." | "BSON serialization..." |  
-| Street Cred | 💯 | ❌ | 🤮 |  
-
----
-
-## **💻 API Cheat Sheet**  
-| Method | What It Does | Example |  
-|--------|-------------|---------|  
-| `add()` | Insert data | `db.add("table", **data)` |  
-| `find()` | Query records | `db.find("table", age__gt=21)` |  
-| `update()` | Modify data | `db.update("table", where={...}, new_value=42)` |  
-| `delete()` | Remove shit | `db.delete("table", id=666)` |  
-| `burn_it_all()` | Just kidding... unless? | 🔥 |  
-
----
-
-## **🛠️ Advanced Usage**  
-**Batch Inserts**  
-```python
-db.batch_import("users", [user1, user2, user3])
+**Build:**
+```bash
+make
 ```
 
-**Custom Validators**  
-```python
-def validate_user(user):
-    if user["age"] < 21:
-        raise ValueError("Not old enough to drink")
+**Use it in your project:**
+```bash
+# Include the header
+#include "kumdb.h"
 
-db.add("users", validator=validate_user, **data)
+# Link against the static lib
+gcc myapp.c build/libkumdb.a -lm -o myapp
+```
+
+**Or just use the CLI:**
+```bash
+./build/bin/kumdb_cli ./mydata
 ```
 
 ---
 
-## **🚨 FAQ**  
-**Q: Is this production-ready?**  
-A: Fuck yeah it is.  
+## **💻 API Cheat Sheet**
 
-**Q: How do I backup data?**  
-A: `cp -r data/ backup/` (congrats, you're a DBA now)  
+```c
+// Open / close
+KumDB *db = kdb_open("./mydata");
+kdb_close(db);
 
-**Q: Can I contribute?**  
-A: Submit a PR or GTFO  
+// Insert
+KdbField fields[] = {
+    kdb_field_string("name",  "Alice"),
+    kdb_field_int   ("age",   25),
+    kdb_field_float ("score", 9.5),
+    kdb_field_bool  ("vip",   1),
+    kdb_field_end   ()
+};
+kdb_add(db, "users", fields);
+
+// Find (NULL filters = all rows)
+const char *filters[] = { "age__gt=21", "name__contains=Ali", NULL };
+KdbRows *rows = kdb_find(db, "users", filters);
+kdb_rows_free(rows);
+
+// Find one
+KdbRow *row = kdb_find_one(db, "users", filters);
+kdb_row_free(row);
+
+// Count
+int64_t n = kdb_count(db, "users", NULL);
+
+// Update
+const char *where[] = { "name=Alice", NULL };
+KdbField patch[] = { kdb_field_int("age", 26), kdb_field_end() };
+kdb_update(db, "users", where, patch, &updated);
+
+// Delete
+kdb_delete(db, "users", where, &deleted);
+
+// Compact (remove soft-deleted rows from disk)
+kdb_compact(db, "users");
+
+// Drop table
+kdb_drop_table(db, "users");
+```
 
 ---
 
-## **📜 License**  
-**WTFPL** - Do What The Fuck You Want Public License  
+## **🔍 Filter Operators**
 
+| Operator | Example | Meaning |
+|----------|---------|---------|
+| *(none)* | `"age=30"` | equals |
+| `__eq` | `"age__eq=30"` | equals |
+| `__neq` | `"age__neq=30"` | not equals |
+| `__gt` | `"age__gt=21"` | greater than |
+| `__gte` | `"age__gte=21"` | greater than or equal |
+| `__lt` | `"age__lt=65"` | less than |
+| `__lte` | `"age__lte=65"` | less than or equal |
+| `__between` | `"age__between=18,30"` | inclusive range |
+| `__contains` | `"name__contains=ali"` | substring match |
+| `__startswith` | `"name__startswith=al"` | prefix match |
+| `__endswith` | `"name__endswith=ice"` | suffix match |
+| `__isnull` | `"notes__isnull"` | field is null |
+| `__isnotnull` | `"notes__isnotnull"` | field is not null |
+
+Multiple filters = AND logic. No OR for now, cry about it.
+
+---
+
+## **🛠️ Tools**
+
+```bash
+# Interactive CLI
+./build/bin/kumdb_cli ./mydata
+
+# Benchmark (default 10k rows)
+./build/bin/bench 50000 ./mydata
+
+# Dump table contents
+./build/bin/dump ./mydata users
+./build/bin/dump ./mydata users --csv
+./build/bin/dump ./mydata users --json --limit 50
 ```
-        DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE 
-                    Version 2, December 2004 
 
- Everyone is permitted to copy and distribute verbatim or modified 
- copies of this license document, and changing it is allowed as long 
- as the name is changed. 
-
-            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE 
-   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION 
-
-  0. You just DO WHAT THE FUCK YOU WANT TO.
+**CLI commands:**
 ```
+open <dir>                          open a database
+tables                              list tables
+schema <table>                      show schema
+add <table> <k=v> [k=v ...]        insert a record
+find <table> [filter ...]          query records
+count <table> [filter ...]         count records
+update <table> where <k=v> set <k=v>  update records
+delete <table> <filter> [...]      delete records
+compact <table>                     compact table file
+drop <table>                        drop table
+```
+
+---
+
+## **⚙️ Build Targets**
+
+```bash
+make              # release build → build/libkumdb.a + build/bin/*
+make debug        # ASAN + UBSan + debug symbols
+make check        # run all tests (use after make debug)
+make distclean    # nuke build/
+```
+
+---
+
+## **🔫 Performance**
+
+| Operation | Speed |
+|-----------|-------|
+| Insert | ~50K ops/sec |
+| Find (full scan) | ~200K rows/sec |
+| Count | ~500K rows/sec |
+| Update (batch) | ~40K ops/sec |
+
+Numbers from `bench` on a mid-range machine. Your mileage may vary. Run `./build/bin/bench` to find out.
+
+---
+
+## **🤬 Comparison**
+
+| Feature | KumDB | SQLite | MongoDB |
+|---------|-------|--------|---------|
+| Learning curve | 5 mins | 5 weeks | 5 years |
+| Setup | drop in 2 files | configure & build | install daemon |
+| Dependencies | none | none | entire ecosystem |
+| Query language | filter strings | SQL | BSON query objects |
+| Debugging | readable errors | "syntax error near..." | "BSON serialization..." |
+| Street cred | 💯 | ❌ | 🤮 |
+
+---
+
+## **🚨 FAQ**
+
+**Q: Is this production-ready?**
+A: It's running on KumOS. You tell me.
+
+**Q: How do I backup data?**
+A: `cp -r mydata/ backup/` — congrats, you're a DBA now.
+
+**Q: Thread safety?**
+A: File-level `fcntl` locks on writes. Multiple readers fine. Don't do concurrent writes from separate processes without knowing what you're doing.
+
+**Q: Can I contribute?**
+A: Submit a PR or GTFO.
 
 ---
 
