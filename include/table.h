@@ -20,7 +20,7 @@ KdbStatus kdb_table_drop(KdbTable   *tbl,
                          const char *data_dir,
                          const char *table_name);
 
-int kdb_table_exists(const char *data_dir, const char *table_name);
+int kdb_storage_table_exists(const char *data_dir, const char *table_name);
 
 KdbStatus kdb_table_add_column(KdbTable       *tbl,
                                const char     *col_name,

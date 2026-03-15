@@ -85,7 +85,7 @@ KdbStatus kdb_table_drop(KdbTable   *tbl,
     return kdb_storage_drop(data_dir, table_name);
 }
 
-int kdb_table_exists(const char *data_dir, const char *table_name) {
+int kdb_storage_table_exists(const char *data_dir, const char *table_name) {
     return kdb_storage_exists(data_dir, table_name);
 }
 

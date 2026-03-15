@@ -217,10 +217,4 @@ typedef enum {
     } while (0)
 
 
-struct KumDB;
-struct KdbTable;
-struct KdbRecord;
-struct KdbQuery;
-struct KdbResult;
-
 #endif

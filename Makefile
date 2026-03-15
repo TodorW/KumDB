@@ -3,7 +3,7 @@ STD     = -std=c11
 WARN    = -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes
 OPT     = -O2
 DEBUG   = -g3 -fsanitize=address,undefined
-DEFINES = -D_POSIX_C_SOURCE=200809L
+DEFINES = -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE
 
 CFLAGS_RELEASE = $(STD) $(WARN) $(OPT) $(DEFINES)
 CFLAGS_DEBUG   = $(STD) $(WARN) $(OPT) $(DEBUG) $(DEFINES)
